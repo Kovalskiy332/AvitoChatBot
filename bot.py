@@ -1,6 +1,5 @@
 import asyncio
 import os
-import sqlite3
 
 from aiogram import Bot, Dispatcher
 from aiogram.filters import Command
@@ -9,9 +8,10 @@ from dotenv import load_dotenv
 
 from db import (
     init_db,
-    add_partner,
+    add_or_update_partner,
+    get_partner_by_telegram_id,
     get_partners,
-    add_transaction,
+    add_transaction_by_telegram_id,
     get_balance,
     get_partner_stats,
     get_history
@@ -23,46 +23,93 @@ load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 if BOT_TOKEN is None:
-    raise ValueError("Не найден BOT_TOKEN в файле .env")
+    raise ValueError("Не найден BOT_TOKEN в файле .env или в переменных окружения")
 
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
 
+def get_user_data(message: Message):
+    # Получаем данные реального Telegram-пользователя
+    user = message.from_user
+
+    return {
+        "telegram_id": user.id,
+        "username": user.username,
+        "first_name": user.first_name,
+        "last_name": user.last_name
+    }
+
+
+def format_user(display_name: str, username: str | None):
+    # Красивое отображение пользователя
+    if username:
+        return f"{display_name} (@{username})"
+
+    return display_name
+
+
 @dp.message(Command("start"))
 async def start_handler(message: Message):
     await message.answer(
         "Привет! Я бот-бухгалтер для перепродажи техники.\n\n"
+        "Я работаю и в личке, и в группе.\n\n"
+        "Сначала каждый партнёр должен написать:\n"
+        "/join\n\n"
         "Команды:\n\n"
-        "/add_partner Иван — добавить участника\n"
-        "/partners — список участников\n\n"
-        "/invest Иван 20000 стартовый вклад — добавить вложение\n"
-        "/expense Иван 25000 купили iPhone 12 — добавить расход\n"
-        "/income Иван 35000 продали iPhone 12 — добавить доход\n\n"
+        "/join — зарегистрироваться как партнёр\n"
+        "/me — мой профиль\n"
+        "/partners — список партнёров\n\n"
+        "/invest 20000 стартовый вклад — добавить вложение\n"
+        "/expense 25000 купили iPhone 12 — добавить расход\n"
+        "/income 35000 продали iPhone 12 — добавить доход\n\n"
         "/balance — общий баланс\n"
-        "/debts — расчёт по участникам\n"
+        "/debts — расчёт по партнёрам\n"
         "/history — последние операции"
     )
 
 
-@dp.message(Command("add_partner"))
-async def add_partner_handler(message: Message):
-    parts = message.text.split(maxsplit=1)
+@dp.message(Command("join"))
+async def join_handler(message: Message):
+    user_data = get_user_data(message)
 
-    if len(parts) < 2:
-        await message.answer("Пример: /add_partner Иван")
+    add_or_update_partner(
+        telegram_id=user_data["telegram_id"],
+        username=user_data["username"],
+        first_name=user_data["first_name"],
+        last_name=user_data["last_name"]
+    )
+
+    username_text = f"@{user_data['username']}" if user_data["username"] else "не указан"
+    first_name_text = user_data["first_name"] if user_data["first_name"] else "не указано"
+
+    await message.answer(
+        "Ты зарегистрирован как партнёр.\n\n"
+        f"Имя: {first_name_text}\n"
+        f"Username: {username_text}"
+    )
+
+
+@dp.message(Command("me"))
+async def me_handler(message: Message):
+    user_data = get_user_data(message)
+    partner = get_partner_by_telegram_id(user_data["telegram_id"])
+
+    if partner is None:
+        await message.answer("Ты ещё не зарегистрирован. Напиши /join")
         return
 
-    name = parts[1].strip()
+    _, telegram_id, username, first_name, last_name, display_name = partner
 
-    try:
-        add_partner(name)
-        await message.answer(f"Участник {name} добавлен.")
-    except sqlite3.IntegrityError:
-        await message.answer("Такой участник уже есть.")
-    except Exception:
-        await message.answer("Не удалось добавить участника.")
+    username_text = f"@{username}" if username else "не указан"
+
+    await message.answer(
+        "Твой профиль партнёра:\n\n"
+        f"Telegram ID: {telegram_id}\n"
+        f"Имя: {display_name}\n"
+        f"Username: {username_text}"
+    )
 
 
 @dp.message(Command("partners"))
@@ -70,50 +117,68 @@ async def partners_handler(message: Message):
     partners = get_partners()
 
     if not partners:
-        await message.answer("Пока нет участников.")
+        await message.answer("Пока нет партнёров. Каждый должен написать /join")
         return
 
-    text = "Участники:\n\n"
+    text = "Партнёры:\n\n"
 
-    for partner_id, name in partners:
-        text += f"{partner_id}. {name}\n"
+    for partner_id, telegram_id, username, display_name in partners:
+        text += f"{partner_id}. {format_user(display_name, username)}\n"
 
     await message.answer(text)
 
 
 async def transaction_handler(message: Message, transaction_type: str):
-    parts = message.text.split(maxsplit=3)
+    user_data = get_user_data(message)
 
-    if len(parts) < 3:
+    partner = get_partner_by_telegram_id(user_data["telegram_id"])
+
+    if partner is None:
+        await message.answer("Сначала зарегистрируйся как партнёр: /join")
+        return
+
+    parts = message.text.split(maxsplit=2)
+
+    if len(parts) < 2:
         await message.answer(
             "Формат команды:\n\n"
-            "/invest Иван 20000 комментарий\n"
-            "/expense Иван 25000 комментарий\n"
-            "/income Иван 35000 комментарий"
+            "/invest 20000 комментарий\n"
+            "/expense 25000 комментарий\n"
+            "/income 35000 комментарий"
         )
         return
 
-    partner_name = parts[1]
-
     try:
-        amount = int(parts[2])
+        amount = int(parts[1])
     except ValueError:
-        await message.answer("Сумма должна быть числом. Например: 25000")
+        await message.answer("Сумма должна быть числом. Например: /expense 25000 купили iPhone 12")
         return
 
     if amount <= 0:
         await message.answer("Сумма должна быть больше нуля.")
         return
 
-    comment = parts[3] if len(parts) > 3 else ""
+    comment = parts[2] if len(parts) > 2 else ""
 
-    try:
-        add_transaction(partner_name, transaction_type, amount, comment)
-        await message.answer("Операция добавлена.")
-    except ValueError:
-        await message.answer("Участник не найден. Сначала добавь его через /add_partner.")
-    except Exception as error:
-        await message.answer(f"Ошибка: {error}")
+    add_transaction_by_telegram_id(
+        telegram_id=user_data["telegram_id"],
+        transaction_type=transaction_type,
+        amount=amount,
+        comment=comment,
+        chat_id=message.chat.id
+    )
+
+    type_names = {
+        "invest": "Вложение",
+        "expense": "Расход",
+        "income": "Доход"
+    }
+
+    await message.answer(
+        f"{type_names.get(transaction_type, 'Операция')} добавлен(а).\n\n"
+        f"Сумма: {amount} ₽\n"
+        f"Комментарий: {comment or '-'}"
+    )
 
 
 @dp.message(Command("invest"))
@@ -151,23 +216,23 @@ async def debts_handler(message: Message):
     stats = get_partner_stats()
 
     if not stats:
-        await message.answer("Пока нет участников.")
+        await message.answer("Пока нет партнёров.")
         return
 
     balance = get_balance()
     partners_count = len(stats)
 
     if partners_count == 0:
-        await message.answer("Нет участников для расчёта.")
+        await message.answer("Нет партнёров для расчёта.")
         return
 
     profit_per_person = balance["profit"] / partners_count
 
-    text = "Расчёт по участникам:\n\n"
+    text = "Расчёт по партнёрам:\n\n"
 
-    for name, invested, expenses_paid, income_received in stats:
+    for display_name, username, invested, expenses_paid, income_received in stats:
         text += (
-            f"{name}:\n"
+            f"{format_user(display_name, username)}:\n"
             f"Вложил: {invested} ₽\n"
             f"Оплатил расходов: {expenses_paid} ₽\n"
             f"Получил доходов: {income_received} ₽\n\n"
@@ -176,10 +241,9 @@ async def debts_handler(message: Message):
     text += (
         "Итог:\n\n"
         f"Общая прибыль: {balance['profit']} ₽\n"
-        f"Количество участников: {partners_count}\n"
+        f"Количество партнёров: {partners_count}\n"
         f"Прибыль на человека: {profit_per_person:.2f} ₽\n\n"
-        "Это базовый расчёт. Следующим шагом можно сделать точный расчёт долгов: "
-        "кто кому сколько должен перевести."
+        "Пока это базовая статистика. Следующий уровень — сделки, где бот будет точно считать, кто кому должен."
     )
 
     await message.answer(text)
@@ -201,11 +265,11 @@ async def history_handler(message: Message):
 
     text = "Последние операции:\n\n"
 
-    for created_at, name, transaction_type, amount, comment in rows:
+    for created_at, display_name, username, transaction_type, amount, comment in rows:
         text += (
             f"{created_at}\n"
             f"{type_names.get(transaction_type, transaction_type)} — {amount} ₽\n"
-            f"Участник: {name}\n"
+            f"Партнёр: {format_user(display_name, username)}\n"
             f"Комментарий: {comment or '-'}\n\n"
         )
 
