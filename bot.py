@@ -53,7 +53,7 @@ LONG_DELETE_DELAY = 180
 MANUAL_DELETE_DELAY = 300
 
 # Файл звука после закрытия сделки
-DEAL_COMPLETE_SOUND = "deal_complete.mp3"
+DEAL_COMPLETE_SOUND = "Starly_-_Hola_(musmore.org).mp3"
 
 
 async def delete_bot_message_later(chat_id: int, message_id: int, delay: int):
