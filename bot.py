@@ -27,7 +27,10 @@ from db import (
     get_global_capital,
     get_report,
     get_history,
-    get_export_data
+    get_export_data,
+    clear_test_data,
+    reset_all_data,
+    delete_deal_by_id
 )
 
 
@@ -56,6 +59,7 @@ ALLOWED_STATUSES = {
 
 
 def user_data(message: Message):
+    # Получаем Telegram-данные человека, который написал команду
     user = message.from_user
 
     return {
@@ -67,6 +71,7 @@ def user_data(message: Message):
 
 
 def user_view(display_name: str, username: str | None):
+    # Красиво отображаем партнёра
     if username:
         return f"{display_name} (@{username})"
 
@@ -74,10 +79,26 @@ def user_view(display_name: str, username: str | None):
 
 
 def require_partner(message: Message):
+    # Проверяем, зарегистрирован ли пользователь как партнёр
     data = user_data(message)
     partner = get_partner_by_telegram_id(data["telegram_id"])
 
     if partner is None:
+        return None
+
+    return partner
+
+
+def require_admin(message: Message):
+    # Проверяем, является ли пользователь админом
+    partner = require_partner(message)
+
+    if partner is None:
+        return None
+
+    is_admin = partner[6]
+
+    if is_admin != 1:
         return None
 
     return partner
@@ -112,7 +133,7 @@ def type_icon(transaction_type: str):
 async def start_handler(message: Message):
     await message.answer(
         "📱 Бот-бухгалтер для перепродажи техники\n\n"
-        "Теперь я умею вести сделки, считать прибыль, долги между партнёрами, "
+        "Я помогаю вести сделки, считать прибыль, долги между партнёрами, "
         "капитал в товаре и делать отчёты.\n\n"
         "🚀 Быстрый старт:\n"
         "1. Каждый партнёр пишет /join\n"
@@ -152,6 +173,10 @@ async def commands_handler(message: Message):
         "/month_report — отчёт за месяц\n"
         "/export — Excel-файл\n"
         "/history — история операций\n\n"
+        "🧹 Очистка:\n"
+        "/clear_test_data — удалить сделки, операции и долги\n"
+        "/delete_deal 1 — удалить конкретную сделку\n"
+        "/reset_all_data — полный сброс базы\n\n"
         "📘 Инструкция:\n"
         "/manual"
     )
@@ -162,42 +187,40 @@ async def manual_handler(message: Message):
     await message.answer(
         "📘 Подробная инструкция\n\n"
         "1️⃣ Регистрация партнёров\n\n"
-        "Каждый человек из вашей команды должен написать:\n"
+        "Каждый человек из команды должен написать:\n"
         "/join\n\n"
-        "После этого бот запомнит его Telegram-аккаунт. "
-        "Теперь не надо писать имя вручную — бот сам понимает, кто добавил расход или доход.\n\n"
+        "Бот запомнит Telegram-аккаунт. После этого не надо писать имя вручную — "
+        "бот сам понимает, кто добавил расход или доход.\n\n"
         "2️⃣ Создание сделки\n\n"
-        "Когда вы купили или планируете купить устройство, создайте сделку:\n"
+        "Одна единица техники = одна сделка.\n\n"
+        "Пример:\n"
         "/new_deal iPhone 12 128GB Black\n\n"
-        "Бот создаст сделку и выдаст её номер, например #1.\n\n"
+        "Бот создаст сделку и выдаст номер, например #1.\n\n"
         "3️⃣ Добавление расходов\n\n"
-        "Расходы — это покупка, ремонт, доставка, аксессуары, комиссии:\n"
+        "Расходы — покупка, ремонт, доставка, аксессуары, комиссии.\n\n"
+        "Примеры:\n"
         "/deal_expense 1 28000 покупка\n"
         "/deal_expense 1 2000 замена АКБ\n"
         "/deal_expense 1 500 доставка\n\n"
-        "Важно: расход записывается на того, кто отправил команду.\n\n"
+        "Расход записывается на того, кто отправил команду.\n\n"
         "4️⃣ Добавление дохода\n\n"
         "Когда устройство продали:\n"
         "/deal_income 1 38000 продажа\n\n"
         "Доход записывается на того, кто получил деньги от покупателя.\n\n"
         "5️⃣ Статусы\n\n"
-        "Можно менять статус сделки:\n"
+        "Менять статус:\n"
         "/status 1 ремонт\n"
         "/status 1 выставлен\n"
         "/status 1 продан\n\n"
-        "Доступные короткие статусы:\n"
+        "Доступные статусы:\n"
         "куплен, проверка, ремонт, готов, выставлен, бронь, продан, закрыт\n\n"
         "6️⃣ Закрытие сделки\n\n"
-        "Когда все расходы и доходы внесены, напишите:\n"
+        "Когда все расходы и доходы внесены:\n"
         "/close_deal 1\n\n"
-        "Бот посчитает:\n"
-        "• общие расходы;\n"
-        "• доход;\n"
-        "• чистую прибыль;\n"
-        "• долю каждого партнёра;\n"
-        "• кто кому должен перевести деньги.\n\n"
+        "Бот посчитает расходы, доходы, чистую прибыль, долю каждого партнёра "
+        "и кто кому должен.\n\n"
         "7️⃣ Долги\n\n"
-        "Посмотреть активные долги:\n"
+        "Посмотреть долги:\n"
         "/debts\n\n"
         "Отметить долг как оплаченный:\n"
         "/pay 1\n\n"
@@ -208,8 +231,11 @@ async def manual_handler(message: Message):
         "/week_report — отчёт за неделю\n"
         "/month_report — отчёт за месяц\n"
         "/export — выгрузка Excel\n\n"
-        "💡 Главный принцип:\n"
-        "одна единица техники = одна сделка. Тогда учёт будет чистым."
+        "9️⃣ Очистка тестовых данных\n\n"
+        "/clear_test_data — удалить сделки, расходы, доходы и долги, но оставить партнёров\n"
+        "/delete_deal 1 — удалить одну конкретную сделку\n"
+        "/reset_all_data — удалить вообще всё, включая партнёров\n\n"
+        "Команды очистки доступны только админу."
     )
 
 
@@ -634,6 +660,89 @@ async def history_handler(message: Message):
         )
 
     await message.answer(text)
+
+
+@dp.message(Command("clear_test_data"))
+async def clear_test_data_handler(message: Message):
+    admin = require_admin(message)
+
+    if admin is None:
+        await message.answer(
+            "⛔ У тебя нет прав на очистку данных.\n\n"
+            "Эта команда доступна только админу."
+        )
+        return
+
+    clear_test_data()
+
+    await message.answer(
+        "🧹 Тестовые данные очищены\n\n"
+        "Удалено:\n"
+        "• все сделки;\n"
+        "• все расходы и доходы;\n"
+        "• все долги.\n\n"
+        "Партнёры сохранены."
+    )
+
+
+@dp.message(Command("reset_all_data"))
+async def reset_all_data_handler(message: Message):
+    admin = require_admin(message)
+
+    if admin is None:
+        await message.answer(
+            "⛔ У тебя нет прав на полный сброс.\n\n"
+            "Эта команда доступна только админу."
+        )
+        return
+
+    reset_all_data()
+
+    await message.answer(
+        "⚠️ Полный сброс выполнен\n\n"
+        "Удалено всё:\n"
+        "• партнёры;\n"
+        "• сделки;\n"
+        "• расходы;\n"
+        "• доходы;\n"
+        "• долги.\n\n"
+        "Теперь каждому партнёру нужно снова написать /join."
+    )
+
+
+@dp.message(Command("delete_deal"))
+async def delete_deal_handler(message: Message):
+    admin = require_admin(message)
+
+    if admin is None:
+        await message.answer(
+            "⛔ У тебя нет прав на удаление сделок.\n\n"
+            "Эта команда доступна только админу."
+        )
+        return
+
+    parts = message.text.split(maxsplit=1)
+
+    if len(parts) < 2:
+        await message.answer("Формат команды:\n/delete_deal 1")
+        return
+
+    try:
+        deal_id = int(parts[1])
+    except ValueError:
+        await message.answer("Номер сделки должен быть числом.")
+        return
+
+    try:
+        delete_deal_by_id(deal_id)
+
+        await message.answer(
+            f"🗑 Сделка #{deal_id} удалена\n\n"
+            "Также удалены все расходы, доходы и долги по этой сделке."
+        )
+
+    except ValueError as error:
+        await message.answer(f"⚠️ {error}")
 
 
 @dp.message(Command("export"))
