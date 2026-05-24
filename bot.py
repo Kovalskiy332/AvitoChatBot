@@ -129,117 +129,117 @@ def type_icon(transaction_type: str):
     return "⚪ Операция"
 
 
-@dp.message(Command("start"))
+@dp.message(Command("bb_start"))
 async def start_handler(message: Message):
     await message.answer(
         "📱 Бот-бухгалтер для перепродажи техники\n\n"
         "Я помогаю вести сделки, считать прибыль, долги между партнёрами, "
         "капитал в товаре и делать отчёты.\n\n"
         "🚀 Быстрый старт:\n"
-        "1. Каждый партнёр пишет /join\n"
-        "2. Создаёте сделку: /new_deal iPhone 12 128GB\n"
-        "3. Добавляете расходы: /deal_expense 1 28000 покупка\n"
-        "4. Добавляете продажу: /deal_income 1 38000 продажа\n"
-        "5. Закрываете сделку: /close_deal 1\n\n"
-        "📘 Подробная инструкция: /manual\n"
-        "📋 Список команд: /commands"
+        "1. Каждый партнёр пишет /bb_join\n"
+        "2. Создаёте сделку: /bb_new_deal iPhone 12 128GB\n"
+        "3. Добавляете расходы: /bb_expense 1 28000 покупка\n"
+        "4. Добавляете продажу: /bb_income 1 38000 продажа\n"
+        "5. Закрываете сделку: /bb_close 1\n\n"
+        "📘 Подробная инструкция: /bb_manual\n"
+        "📋 Список команд: /bb_commands"
     )
 
 
-@dp.message(Command("commands"))
+@dp.message(Command("bb_commands"))
 async def commands_handler(message: Message):
     await message.answer(
-        "📋 Команды бота\n\n"
+        "📋 Команды бота-бухгалтера\n\n"
         "👥 Партнёры:\n"
-        "/join — зарегистрироваться\n"
-        "/me — мой профиль\n"
-        "/partners — список партнёров\n\n"
+        "/bb_join — зарегистрироваться\n"
+        "/bb_me — мой профиль\n"
+        "/bb_partners — список партнёров\n\n"
         "📦 Сделки:\n"
-        "/new_deal название — создать сделку\n"
-        "/deals — список сделок\n"
-        "/deal номер — карточка сделки\n"
-        "/status номер статус — изменить статус\n\n"
+        "/bb_new_deal название — создать сделку\n"
+        "/bb_deals — список сделок\n"
+        "/bb_deal номер — карточка сделки\n"
+        "/bb_status номер статус — изменить статус\n\n"
         "💸 Деньги:\n"
-        "/deal_expense номер сумма комментарий — расход\n"
-        "/deal_income номер сумма комментарий — доход\n"
-        "/close_deal номер — закрыть сделку\n"
-        "/debts — долги\n"
-        "/pay номер — отметить долг оплаченным\n\n"
+        "/bb_expense номер сумма комментарий — расход\n"
+        "/bb_income номер сумма комментарий — доход\n"
+        "/bb_close номер — закрыть сделку\n"
+        "/bb_debts — долги\n"
+        "/bb_pay номер — отметить долг оплаченным\n\n"
         "📊 Отчёты:\n"
-        "/stock — техника в работе\n"
-        "/capital — капитал\n"
-        "/day_report — отчёт за день\n"
-        "/week_report — отчёт за неделю\n"
-        "/month_report — отчёт за месяц\n"
-        "/export — Excel-файл\n"
-        "/history — история операций\n\n"
+        "/bb_stock — техника в работе\n"
+        "/bb_capital — капитал\n"
+        "/bb_day — отчёт за день\n"
+        "/bb_week — отчёт за неделю\n"
+        "/bb_month — отчёт за месяц\n"
+        "/bb_export — Excel-файл\n"
+        "/bb_history — история операций\n\n"
         "🧹 Очистка:\n"
-        "/clear_test_data — удалить сделки, операции и долги\n"
-        "/delete_deal 1 — удалить конкретную сделку\n"
-        "/reset_all_data — полный сброс базы\n\n"
+        "/bb_clear — удалить сделки, операции и долги\n"
+        "/bb_delete_deal 1 — удалить конкретную сделку\n"
+        "/bb_reset — полный сброс базы\n\n"
         "📘 Инструкция:\n"
-        "/manual"
+        "/bb_manual"
     )
 
 
-@dp.message(Command("manual"))
+@dp.message(Command("bb_manual"))
 async def manual_handler(message: Message):
     await message.answer(
         "📘 Подробная инструкция\n\n"
         "1️⃣ Регистрация партнёров\n\n"
         "Каждый человек из команды должен написать:\n"
-        "/join\n\n"
+        "/bb_join\n\n"
         "Бот запомнит Telegram-аккаунт. После этого не надо писать имя вручную — "
         "бот сам понимает, кто добавил расход или доход.\n\n"
         "2️⃣ Создание сделки\n\n"
         "Одна единица техники = одна сделка.\n\n"
         "Пример:\n"
-        "/new_deal iPhone 12 128GB Black\n\n"
+        "/bb_new_deal iPhone 12 128GB Black\n\n"
         "Бот создаст сделку и выдаст номер, например #1.\n\n"
         "3️⃣ Добавление расходов\n\n"
         "Расходы — покупка, ремонт, доставка, аксессуары, комиссии.\n\n"
         "Примеры:\n"
-        "/deal_expense 1 28000 покупка\n"
-        "/deal_expense 1 2000 замена АКБ\n"
-        "/deal_expense 1 500 доставка\n\n"
+        "/bb_expense 1 28000 покупка\n"
+        "/bb_expense 1 2000 замена АКБ\n"
+        "/bb_expense 1 500 доставка\n\n"
         "Расход записывается на того, кто отправил команду.\n\n"
         "4️⃣ Добавление дохода\n\n"
         "Когда устройство продали:\n"
-        "/deal_income 1 38000 продажа\n\n"
+        "/bb_income 1 38000 продажа\n\n"
         "Доход записывается на того, кто получил деньги от покупателя.\n\n"
         "5️⃣ Статусы\n\n"
         "Менять статус:\n"
-        "/status 1 ремонт\n"
-        "/status 1 выставлен\n"
-        "/status 1 продан\n\n"
+        "/bb_status 1 ремонт\n"
+        "/bb_status 1 выставлен\n"
+        "/bb_status 1 продан\n\n"
         "Доступные статусы:\n"
         "куплен, проверка, ремонт, готов, выставлен, бронь, продан, закрыт\n\n"
         "6️⃣ Закрытие сделки\n\n"
         "Когда все расходы и доходы внесены:\n"
-        "/close_deal 1\n\n"
+        "/bb_close 1\n\n"
         "Бот посчитает расходы, доходы, чистую прибыль, долю каждого партнёра "
         "и кто кому должен.\n\n"
         "7️⃣ Долги\n\n"
         "Посмотреть долги:\n"
-        "/debts\n\n"
+        "/bb_debts\n\n"
         "Отметить долг как оплаченный:\n"
-        "/pay 1\n\n"
+        "/bb_pay 1\n\n"
         "8️⃣ Отчёты\n\n"
-        "/stock — техника в работе\n"
-        "/capital — деньги в товаре и общая прибыль\n"
-        "/day_report — отчёт за день\n"
-        "/week_report — отчёт за неделю\n"
-        "/month_report — отчёт за месяц\n"
-        "/export — выгрузка Excel\n\n"
+        "/bb_stock — техника в работе\n"
+        "/bb_capital — деньги в товаре и общая прибыль\n"
+        "/bb_day — отчёт за день\n"
+        "/bb_week — отчёт за неделю\n"
+        "/bb_month — отчёт за месяц\n"
+        "/bb_export — выгрузка Excel\n\n"
         "9️⃣ Очистка тестовых данных\n\n"
-        "/clear_test_data — удалить сделки, расходы, доходы и долги, но оставить партнёров\n"
-        "/delete_deal 1 — удалить одну конкретную сделку\n"
-        "/reset_all_data — удалить вообще всё, включая партнёров\n\n"
+        "/bb_clear — удалить сделки, расходы, доходы и долги, но оставить партнёров\n"
+        "/bb_delete_deal 1 — удалить одну конкретную сделку\n"
+        "/bb_reset — удалить вообще всё, включая партнёров\n\n"
         "Команды очистки доступны только админу."
     )
 
 
-@dp.message(Command("join"))
+@dp.message(Command("bb_join"))
 async def join_handler(message: Message):
     data = user_data(message)
 
@@ -260,12 +260,12 @@ async def join_handler(message: Message):
     )
 
 
-@dp.message(Command("me"))
+@dp.message(Command("bb_me"))
 async def me_handler(message: Message):
     partner = require_partner(message)
 
     if partner is None:
-        await message.answer("⚠️ Ты ещё не зарегистрирован. Напиши /join")
+        await message.answer("⚠️ Ты ещё не зарегистрирован. Напиши /bb_join")
         return
 
     _, telegram_id, username, first_name, last_name, display_name, is_admin = partner
@@ -279,12 +279,12 @@ async def me_handler(message: Message):
     )
 
 
-@dp.message(Command("partners"))
+@dp.message(Command("bb_partners"))
 async def partners_handler(message: Message):
     partners = get_partners()
 
     if not partners:
-        await message.answer("👥 Партнёров пока нет. Каждый должен написать /join")
+        await message.answer("👥 Партнёров пока нет. Каждый должен написать /bb_join")
         return
 
     text = "👥 Партнёры команды\n\n"
@@ -296,18 +296,18 @@ async def partners_handler(message: Message):
     await message.answer(text)
 
 
-@dp.message(Command("new_deal"))
+@dp.message(Command("bb_new_deal"))
 async def new_deal_handler(message: Message):
     partner = require_partner(message)
 
     if partner is None:
-        await message.answer("⚠️ Сначала зарегистрируйся: /join")
+        await message.answer("⚠️ Сначала зарегистрируйся: /bb_join")
         return
 
     parts = message.text.split(maxsplit=1)
 
     if len(parts) < 2:
-        await message.answer("Пример:\n/new_deal iPhone 12 128GB Black")
+        await message.answer("Пример:\n/bb_new_deal iPhone 12 128GB Black")
         return
 
     title = parts[1].strip()
@@ -319,16 +319,16 @@ async def new_deal_handler(message: Message):
         f"Название: {title}\n"
         "Статус: 🛒 куплен\n\n"
         "Теперь можно добавить расход:\n"
-        f"/deal_expense {deal_id} 28000 покупка"
+        f"/bb_expense {deal_id} 28000 покупка"
     )
 
 
-@dp.message(Command("deals"))
+@dp.message(Command("bb_deals"))
 async def deals_handler(message: Message):
     deals = get_deals()
 
     if not deals:
-        await message.answer("📦 Сделок пока нет.\n\nСоздать сделку: /new_deal iPhone 12")
+        await message.answer("📦 Сделок пока нет.\n\nСоздать сделку: /bb_new_deal iPhone 12")
         return
 
     text = "📦 Последние сделки\n\n"
@@ -341,12 +341,12 @@ async def deals_handler(message: Message):
     await message.answer(text)
 
 
-@dp.message(Command("deal"))
+@dp.message(Command("bb_deal"))
 async def deal_handler(message: Message):
     parts = message.text.split(maxsplit=1)
 
     if len(parts) < 2:
-        await message.answer("Пример:\n/deal 1")
+        await message.answer("Пример:\n/bb_deal 1")
         return
 
     try:
@@ -392,13 +392,13 @@ async def deal_handler(message: Message):
     await message.answer(text)
 
 
-@dp.message(Command("status"))
+@dp.message(Command("bb_status"))
 async def status_handler(message: Message):
     parts = message.text.split(maxsplit=2)
 
     if len(parts) < 3:
         await message.answer(
-            "Пример:\n/status 1 ремонт\n\n"
+            "Пример:\n/bb_status 1 ремонт\n\n"
             "Статусы: куплен, проверка, ремонт, готов, выставлен, бронь, продан, закрыт"
         )
         return
@@ -432,7 +432,7 @@ async def deal_transaction_handler(message: Message, transaction_type: str):
     partner = require_partner(message)
 
     if partner is None:
-        await message.answer("⚠️ Сначала зарегистрируйся: /join")
+        await message.answer("⚠️ Сначала зарегистрируйся: /bb_join")
         return
 
     parts = message.text.split(maxsplit=3)
@@ -440,8 +440,8 @@ async def deal_transaction_handler(message: Message, transaction_type: str):
     if len(parts) < 3:
         await message.answer(
             "Формат:\n"
-            "/deal_expense 1 28000 покупка\n"
-            "/deal_income 1 38000 продажа"
+            "/bb_expense 1 28000 покупка\n"
+            "/bb_income 1 38000 продажа"
         )
         return
 
@@ -478,22 +478,22 @@ async def deal_transaction_handler(message: Message, transaction_type: str):
         await message.answer(f"⚠️ {error}")
 
 
-@dp.message(Command("deal_expense"))
+@dp.message(Command("bb_expense"))
 async def deal_expense_handler(message: Message):
     await deal_transaction_handler(message, "expense")
 
 
-@dp.message(Command("deal_income"))
+@dp.message(Command("bb_income"))
 async def deal_income_handler(message: Message):
     await deal_transaction_handler(message, "income")
 
 
-@dp.message(Command("close_deal"))
+@dp.message(Command("bb_close"))
 async def close_deal_handler(message: Message):
     parts = message.text.split(maxsplit=1)
 
     if len(parts) < 2:
-        await message.answer("Пример:\n/close_deal 1")
+        await message.answer("Пример:\n/bb_close 1")
         return
 
     try:
@@ -521,7 +521,7 @@ async def close_deal_handler(message: Message):
         else:
             text += "✅ Долгов по этой сделке нет.\n"
 
-        text += "\nПосмотреть все долги: /debts"
+        text += "\nПосмотреть все долги: /bb_debts"
 
         await message.answer(text)
 
@@ -529,7 +529,7 @@ async def close_deal_handler(message: Message):
         await message.answer(f"⚠️ {error}")
 
 
-@dp.message(Command("debts"))
+@dp.message(Command("bb_debts"))
 async def debts_handler(message: Message):
     payments = get_unpaid_payments()
 
@@ -544,18 +544,18 @@ async def debts_handler(message: Message):
             f"#{payment_id} по сделке #{deal_id} — {title}\n"
             f"{user_view(from_name, from_username)} → {user_view(to_name, to_username)}\n"
             f"Сумма: {money(amount)} ₽\n"
-            f"Отметить оплату: /pay {payment_id}\n\n"
+            f"Отметить оплату: /bb_pay {payment_id}\n\n"
         )
 
     await message.answer(text)
 
 
-@dp.message(Command("pay"))
+@dp.message(Command("bb_pay"))
 async def pay_handler(message: Message):
     parts = message.text.split(maxsplit=1)
 
     if len(parts) < 2:
-        await message.answer("Пример:\n/pay 1")
+        await message.answer("Пример:\n/bb_pay 1")
         return
 
     try:
@@ -571,7 +571,7 @@ async def pay_handler(message: Message):
         await message.answer(f"⚠️ {error}")
 
 
-@dp.message(Command("stock"))
+@dp.message(Command("bb_stock"))
 async def stock_handler(message: Message):
     deals = get_deals(only_open=True)
 
@@ -594,7 +594,7 @@ async def stock_handler(message: Message):
     await message.answer(text)
 
 
-@dp.message(Command("capital"))
+@dp.message(Command("bb_capital"))
 async def capital_handler(message: Message):
     data = get_global_capital()
 
@@ -626,22 +626,22 @@ async def report_handler(message: Message, days: int, title: str):
     )
 
 
-@dp.message(Command("day_report"))
+@dp.message(Command("bb_day"))
 async def day_report_handler(message: Message):
     await report_handler(message, 1, "Отчёт за день")
 
 
-@dp.message(Command("week_report"))
+@dp.message(Command("bb_week"))
 async def week_report_handler(message: Message):
     await report_handler(message, 7, "Отчёт за неделю")
 
 
-@dp.message(Command("month_report"))
+@dp.message(Command("bb_month"))
 async def month_report_handler(message: Message):
     await report_handler(message, 30, "Отчёт за месяц")
 
 
-@dp.message(Command("history"))
+@dp.message(Command("bb_history"))
 async def history_handler(message: Message):
     rows = get_history()
 
@@ -662,7 +662,7 @@ async def history_handler(message: Message):
     await message.answer(text)
 
 
-@dp.message(Command("clear_test_data"))
+@dp.message(Command("bb_clear"))
 async def clear_test_data_handler(message: Message):
     admin = require_admin(message)
 
@@ -685,7 +685,7 @@ async def clear_test_data_handler(message: Message):
     )
 
 
-@dp.message(Command("reset_all_data"))
+@dp.message(Command("bb_reset"))
 async def reset_all_data_handler(message: Message):
     admin = require_admin(message)
 
@@ -706,11 +706,11 @@ async def reset_all_data_handler(message: Message):
         "• расходы;\n"
         "• доходы;\n"
         "• долги.\n\n"
-        "Теперь каждому партнёру нужно снова написать /join."
+        "Теперь каждому партнёру нужно снова написать /bb_join."
     )
 
 
-@dp.message(Command("delete_deal"))
+@dp.message(Command("bb_delete_deal"))
 async def delete_deal_handler(message: Message):
     admin = require_admin(message)
 
@@ -724,7 +724,7 @@ async def delete_deal_handler(message: Message):
     parts = message.text.split(maxsplit=1)
 
     if len(parts) < 2:
-        await message.answer("Формат команды:\n/delete_deal 1")
+        await message.answer("Формат команды:\n/bb_delete_deal 1")
         return
 
     try:
@@ -745,7 +745,7 @@ async def delete_deal_handler(message: Message):
         await message.answer(f"⚠️ {error}")
 
 
-@dp.message(Command("export"))
+@dp.message(Command("bb_export"))
 async def export_handler(message: Message):
     data = get_export_data()
 
