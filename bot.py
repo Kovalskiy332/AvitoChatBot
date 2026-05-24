@@ -52,6 +52,9 @@ SHORT_DELETE_DELAY = 45
 LONG_DELETE_DELAY = 180
 MANUAL_DELETE_DELAY = 300
 
+# Файл звука после закрытия сделки
+DEAL_COMPLETE_SOUND = "deal_complete.mp3"
+
 
 async def delete_bot_message_later(chat_id: int, message_id: int, delay: int):
     # Удаляет сообщение бота через указанное время
@@ -99,6 +102,31 @@ async def send_temp_document(message: Message, file_path: str, caption: str, del
     return sent_message
 
 
+async def send_deal_sound(message: Message):
+    # Отправляет звук после успешного закрытия сделки
+    if not os.path.exists(DEAL_COMPLETE_SOUND):
+        return
+
+    try:
+        sent_message = await message.answer_audio(
+            audio=FSInputFile(DEAL_COMPLETE_SOUND),
+            caption="🎉 Сделка закрыта! Деньги пошли."
+        )
+
+        if message.chat.type in ("group", "supergroup"):
+            asyncio.create_task(
+                delete_bot_message_later(
+                    chat_id=sent_message.chat.id,
+                    message_id=sent_message.message_id,
+                    delay=LONG_DELETE_DELAY
+                )
+            )
+
+    except Exception:
+        # Если звук не отправился, бот продолжит работать
+        pass
+
+
 ALLOWED_STATUSES = {
     "куплен": "куплен",
     "проверка": "на проверке",
@@ -112,7 +140,6 @@ ALLOWED_STATUSES = {
 
 
 def user_data(message: Message):
-    # Получаем Telegram-данные человека, который написал команду
     user = message.from_user
 
     return {
@@ -124,7 +151,6 @@ def user_data(message: Message):
 
 
 def user_view(display_name: str, username: str | None):
-    # Красиво отображаем партнёра
     if username:
         return f"{display_name} (@{username})"
 
@@ -132,7 +158,6 @@ def user_view(display_name: str, username: str | None):
 
 
 def require_partner(message: Message):
-    # Проверяем, зарегистрирован ли пользователь как партнёр
     data = user_data(message)
     partner = get_partner_by_telegram_id(data["telegram_id"])
 
@@ -143,7 +168,6 @@ def require_partner(message: Message):
 
 
 def require_admin(message: Message):
-    # Проверяем, является ли пользователь админом бота
     partner = require_partner(message)
 
     if partner is None:
@@ -262,14 +286,11 @@ async def manual_handler(message: Message):
         "1️⃣ Регистрация партнёров\n\n"
         "Каждый человек из команды должен написать:\n"
         "/bb_join\n\n"
-        "Бот запомнит Telegram-аккаунт. После этого не надо писать имя вручную — "
-        "бот сам понимает, кто добавил расход или доход.\n\n"
         "2️⃣ Создание сделки\n\n"
         "Одна единица техники = одна сделка.\n\n"
         "Пример:\n"
         "/bb_new_deal iPhone 12 128GB Black\n\n"
         "3️⃣ Добавление расходов\n\n"
-        "Примеры:\n"
         "/bb_expense 1 28000 покупка\n"
         "/bb_expense 1 2000 замена АКБ\n"
         "/bb_expense 1 500 доставка\n\n"
@@ -283,8 +304,7 @@ async def manual_handler(message: Message):
         "куплен, проверка, ремонт, готов, выставлен, бронь, продан, закрыт\n\n"
         "6️⃣ Закрытие сделки\n\n"
         "/bb_close 1\n\n"
-        "Бот посчитает расходы, доходы, чистую прибыль, долю каждого партнёра "
-        "и кто кому должен.\n\n"
+        "После закрытия бот посчитает прибыль, долю каждого, долги и отправит звук.\n\n"
         "7️⃣ Долги\n\n"
         "/bb_debts — посмотреть долги\n"
         "/bb_pay 1 — отметить долг как оплаченный\n\n"
@@ -602,6 +622,9 @@ async def close_deal_handler(message: Message):
         text += "\nПосмотреть все долги: /bb_debts"
 
         await send_temp_message(message, text, delay=LONG_DELETE_DELAY)
+
+        # Звук после успешного закрытия сделки
+        await send_deal_sound(message)
 
     except ValueError as error:
         await send_temp_message(message, f"⚠️ {error}")
