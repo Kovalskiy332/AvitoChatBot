@@ -46,6 +46,59 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
 
+# Через сколько секунд удалять сообщения бота в группе
+DEFAULT_DELETE_DELAY = 90
+SHORT_DELETE_DELAY = 45
+LONG_DELETE_DELAY = 180
+MANUAL_DELETE_DELAY = 300
+
+
+async def delete_bot_message_later(chat_id: int, message_id: int, delay: int):
+    # Удаляет сообщение бота через указанное время
+    await asyncio.sleep(delay)
+
+    try:
+        await bot.delete_message(chat_id=chat_id, message_id=message_id)
+    except Exception:
+        # Не ломаем бота, если сообщение уже удалено или нет прав
+        pass
+
+
+async def send_temp_message(message: Message, text: str, delay: int = DEFAULT_DELETE_DELAY):
+    # Отправляет сообщение и удаляет его в группе через delay секунд
+    sent_message = await message.answer(text)
+
+    if message.chat.type in ("group", "supergroup"):
+        asyncio.create_task(
+            delete_bot_message_later(
+                chat_id=sent_message.chat.id,
+                message_id=sent_message.message_id,
+                delay=delay
+            )
+        )
+
+    return sent_message
+
+
+async def send_temp_document(message: Message, file_path: str, caption: str, delay: int = LONG_DELETE_DELAY):
+    # Отправляет документ и удаляет сообщение с документом в группе
+    sent_message = await message.answer_document(
+        FSInputFile(file_path),
+        caption=caption
+    )
+
+    if message.chat.type in ("group", "supergroup"):
+        asyncio.create_task(
+            delete_bot_message_later(
+                chat_id=sent_message.chat.id,
+                message_id=sent_message.message_id,
+                delay=delay
+            )
+        )
+
+    return sent_message
+
+
 ALLOWED_STATUSES = {
     "куплен": "куплен",
     "проверка": "на проверке",
@@ -90,18 +143,33 @@ def require_partner(message: Message):
 
 
 def require_admin(message: Message):
-    # Проверяем, является ли пользователь админом
+    # Проверяем, является ли пользователь админом бота
     partner = require_partner(message)
 
     if partner is None:
         return None
 
+    user_id = message.from_user.id
+
+    admin_ids_raw = os.getenv("ADMIN_IDS", "")
+    admin_ids = []
+
+    if admin_ids_raw:
+        admin_ids = [
+            int(admin_id.strip())
+            for admin_id in admin_ids_raw.split(",")
+            if admin_id.strip().isdigit()
+        ]
+
+    if user_id in admin_ids:
+        return partner
+
     is_admin = partner[6]
 
-    if is_admin != 1:
-        return None
+    if is_admin == 1:
+        return partner
 
-    return partner
+    return None
 
 
 def deal_status_icon(status: str):
@@ -131,7 +199,8 @@ def type_icon(transaction_type: str):
 
 @dp.message(Command("bb_start"))
 async def start_handler(message: Message):
-    await message.answer(
+    await send_temp_message(
+        message,
         "📱 Бот-бухгалтер для перепродажи техники\n\n"
         "Я помогаю вести сделки, считать прибыль, долги между партнёрами, "
         "капитал в товаре и делать отчёты.\n\n"
@@ -142,13 +211,15 @@ async def start_handler(message: Message):
         "4. Добавляете продажу: /bb_income 1 38000 продажа\n"
         "5. Закрываете сделку: /bb_close 1\n\n"
         "📘 Подробная инструкция: /bb_manual\n"
-        "📋 Список команд: /bb_commands"
+        "📋 Список команд: /bb_commands",
+        delay=LONG_DELETE_DELAY
     )
 
 
 @dp.message(Command("bb_commands"))
 async def commands_handler(message: Message):
-    await message.answer(
+    await send_temp_message(
+        message,
         "📋 Команды бота-бухгалтера\n\n"
         "👥 Партнёры:\n"
         "/bb_join — зарегистрироваться\n"
@@ -178,13 +249,15 @@ async def commands_handler(message: Message):
         "/bb_delete_deal 1 — удалить конкретную сделку\n"
         "/bb_reset — полный сброс базы\n\n"
         "📘 Инструкция:\n"
-        "/bb_manual"
+        "/bb_manual",
+        delay=LONG_DELETE_DELAY
     )
 
 
 @dp.message(Command("bb_manual"))
 async def manual_handler(message: Message):
-    await message.answer(
+    await send_temp_message(
+        message,
         "📘 Подробная инструкция\n\n"
         "1️⃣ Регистрация партнёров\n\n"
         "Каждый человек из команды должен написать:\n"
@@ -195,35 +268,26 @@ async def manual_handler(message: Message):
         "Одна единица техники = одна сделка.\n\n"
         "Пример:\n"
         "/bb_new_deal iPhone 12 128GB Black\n\n"
-        "Бот создаст сделку и выдаст номер, например #1.\n\n"
         "3️⃣ Добавление расходов\n\n"
-        "Расходы — покупка, ремонт, доставка, аксессуары, комиссии.\n\n"
         "Примеры:\n"
         "/bb_expense 1 28000 покупка\n"
         "/bb_expense 1 2000 замена АКБ\n"
         "/bb_expense 1 500 доставка\n\n"
-        "Расход записывается на того, кто отправил команду.\n\n"
         "4️⃣ Добавление дохода\n\n"
-        "Когда устройство продали:\n"
         "/bb_income 1 38000 продажа\n\n"
-        "Доход записывается на того, кто получил деньги от покупателя.\n\n"
         "5️⃣ Статусы\n\n"
-        "Менять статус:\n"
         "/bb_status 1 ремонт\n"
         "/bb_status 1 выставлен\n"
         "/bb_status 1 продан\n\n"
         "Доступные статусы:\n"
         "куплен, проверка, ремонт, готов, выставлен, бронь, продан, закрыт\n\n"
         "6️⃣ Закрытие сделки\n\n"
-        "Когда все расходы и доходы внесены:\n"
         "/bb_close 1\n\n"
         "Бот посчитает расходы, доходы, чистую прибыль, долю каждого партнёра "
         "и кто кому должен.\n\n"
         "7️⃣ Долги\n\n"
-        "Посмотреть долги:\n"
-        "/bb_debts\n\n"
-        "Отметить долг как оплаченный:\n"
-        "/bb_pay 1\n\n"
+        "/bb_debts — посмотреть долги\n"
+        "/bb_pay 1 — отметить долг как оплаченный\n\n"
         "8️⃣ Отчёты\n\n"
         "/bb_stock — техника в работе\n"
         "/bb_capital — деньги в товаре и общая прибыль\n"
@@ -235,7 +299,8 @@ async def manual_handler(message: Message):
         "/bb_clear — удалить сделки, расходы, доходы и долги, но оставить партнёров\n"
         "/bb_delete_deal 1 — удалить одну конкретную сделку\n"
         "/bb_reset — удалить вообще всё, включая партнёров\n\n"
-        "Команды очистки доступны только админу."
+        "Команды очистки доступны только админу.",
+        delay=MANUAL_DELETE_DELAY
     )
 
 
@@ -252,11 +317,13 @@ async def join_handler(message: Message):
 
     username = f"@{data['username']}" if data["username"] else "не указан"
 
-    await message.answer(
+    await send_temp_message(
+        message,
         "✅ Партнёр зарегистрирован\n\n"
         f"👤 Имя: {data['first_name'] or 'не указано'}\n"
         f"🔗 Username: {username}\n\n"
-        "Теперь ты можешь добавлять сделки, расходы и доходы."
+        "Теперь ты можешь добавлять сделки, расходы и доходы.",
+        delay=SHORT_DELETE_DELAY
     )
 
 
@@ -265,12 +332,13 @@ async def me_handler(message: Message):
     partner = require_partner(message)
 
     if partner is None:
-        await message.answer("⚠️ Ты ещё не зарегистрирован. Напиши /bb_join")
+        await send_temp_message(message, "⚠️ Ты ещё не зарегистрирован. Напиши /bb_join")
         return
 
     _, telegram_id, username, first_name, last_name, display_name, is_admin = partner
 
-    await message.answer(
+    await send_temp_message(
+        message,
         "👤 Твой профиль\n\n"
         f"ID: {telegram_id}\n"
         f"Имя: {display_name}\n"
@@ -284,7 +352,7 @@ async def partners_handler(message: Message):
     partners = get_partners()
 
     if not partners:
-        await message.answer("👥 Партнёров пока нет. Каждый должен написать /bb_join")
+        await send_temp_message(message, "👥 Партнёров пока нет. Каждый должен написать /bb_join")
         return
 
     text = "👥 Партнёры команды\n\n"
@@ -293,7 +361,7 @@ async def partners_handler(message: Message):
         role = "👑 админ" if is_admin else "🤝 партнёр"
         text += f"{partner_id}. {user_view(display_name, username)} — {role}\n"
 
-    await message.answer(text)
+    await send_temp_message(message, text)
 
 
 @dp.message(Command("bb_new_deal"))
@@ -301,19 +369,20 @@ async def new_deal_handler(message: Message):
     partner = require_partner(message)
 
     if partner is None:
-        await message.answer("⚠️ Сначала зарегистрируйся: /bb_join")
+        await send_temp_message(message, "⚠️ Сначала зарегистрируйся: /bb_join")
         return
 
     parts = message.text.split(maxsplit=1)
 
     if len(parts) < 2:
-        await message.answer("Пример:\n/bb_new_deal iPhone 12 128GB Black")
+        await send_temp_message(message, "Пример:\n/bb_new_deal iPhone 12 128GB Black")
         return
 
     title = parts[1].strip()
     deal_id = create_deal(title, message.from_user.id)
 
-    await message.answer(
+    await send_temp_message(
+        message,
         "📦 Сделка создана\n\n"
         f"Номер: #{deal_id}\n"
         f"Название: {title}\n"
@@ -328,7 +397,7 @@ async def deals_handler(message: Message):
     deals = get_deals()
 
     if not deals:
-        await message.answer("📦 Сделок пока нет.\n\nСоздать сделку: /bb_new_deal iPhone 12")
+        await send_temp_message(message, "📦 Сделок пока нет.\n\nСоздать сделку: /bb_new_deal iPhone 12")
         return
 
     text = "📦 Последние сделки\n\n"
@@ -338,7 +407,7 @@ async def deals_handler(message: Message):
         text += f"#{deal_id} {deal_status_icon(status)} {title}\n"
         text += f"Статус: {status}, {closed_text}\n\n"
 
-    await message.answer(text)
+    await send_temp_message(message, text, delay=LONG_DELETE_DELAY)
 
 
 @dp.message(Command("bb_deal"))
@@ -346,19 +415,19 @@ async def deal_handler(message: Message):
     parts = message.text.split(maxsplit=1)
 
     if len(parts) < 2:
-        await message.answer("Пример:\n/bb_deal 1")
+        await send_temp_message(message, "Пример:\n/bb_deal 1")
         return
 
     try:
         deal_id = int(parts[1])
     except ValueError:
-        await message.answer("Номер сделки должен быть числом.")
+        await send_temp_message(message, "Номер сделки должен быть числом.")
         return
 
     deal = get_deal(deal_id)
 
     if deal is None:
-        await message.answer("⚠️ Сделка не найдена.")
+        await send_temp_message(message, "⚠️ Сделка не найдена.")
         return
 
     deal_id, title, status, is_closed, created_at, closed_at, creator_name, creator_username = deal
@@ -389,7 +458,7 @@ async def deal_handler(message: Message):
     else:
         text += "🧾 Операций пока нет.\n"
 
-    await message.answer(text)
+    await send_temp_message(message, text, delay=LONG_DELETE_DELAY)
 
 
 @dp.message(Command("bb_status"))
@@ -397,7 +466,8 @@ async def status_handler(message: Message):
     parts = message.text.split(maxsplit=2)
 
     if len(parts) < 3:
-        await message.answer(
+        await send_temp_message(
+            message,
             "Пример:\n/bb_status 1 ремонт\n\n"
             "Статусы: куплен, проверка, ремонт, готов, выставлен, бронь, продан, закрыт"
         )
@@ -406,13 +476,14 @@ async def status_handler(message: Message):
     try:
         deal_id = int(parts[1])
     except ValueError:
-        await message.answer("Номер сделки должен быть числом.")
+        await send_temp_message(message, "Номер сделки должен быть числом.")
         return
 
     raw_status = parts[2].lower().strip()
 
     if raw_status not in ALLOWED_STATUSES:
-        await message.answer(
+        await send_temp_message(
+            message,
             "⚠️ Неизвестный статус.\n\n"
             "Доступные статусы:\n"
             "куплен, проверка, ремонт, готов, выставлен, бронь, продан, закрыт"
@@ -423,22 +494,27 @@ async def status_handler(message: Message):
 
     try:
         update_deal_status(deal_id, status)
-        await message.answer(f"✅ Статус сделки #{deal_id} изменён на: {deal_status_icon(status)} {status}")
+        await send_temp_message(
+            message,
+            f"✅ Статус сделки #{deal_id} изменён на: {deal_status_icon(status)} {status}",
+            delay=SHORT_DELETE_DELAY
+        )
     except ValueError as error:
-        await message.answer(f"⚠️ {error}")
+        await send_temp_message(message, f"⚠️ {error}")
 
 
 async def deal_transaction_handler(message: Message, transaction_type: str):
     partner = require_partner(message)
 
     if partner is None:
-        await message.answer("⚠️ Сначала зарегистрируйся: /bb_join")
+        await send_temp_message(message, "⚠️ Сначала зарегистрируйся: /bb_join")
         return
 
     parts = message.text.split(maxsplit=3)
 
     if len(parts) < 3:
-        await message.answer(
+        await send_temp_message(
+            message,
             "Формат:\n"
             "/bb_expense 1 28000 покупка\n"
             "/bb_income 1 38000 продажа"
@@ -449,11 +525,11 @@ async def deal_transaction_handler(message: Message, transaction_type: str):
         deal_id = int(parts[1])
         amount = int(parts[2])
     except ValueError:
-        await message.answer("Номер сделки и сумма должны быть числами.")
+        await send_temp_message(message, "Номер сделки и сумма должны быть числами.")
         return
 
     if amount <= 0:
-        await message.answer("Сумма должна быть больше нуля.")
+        await send_temp_message(message, "Сумма должна быть больше нуля.")
         return
 
     comment = parts[3] if len(parts) > 3 else ""
@@ -467,15 +543,17 @@ async def deal_transaction_handler(message: Message, transaction_type: str):
             comment=comment
         )
 
-        await message.answer(
+        await send_temp_message(
+            message,
             f"{type_icon(transaction_type)} добавлен\n\n"
             f"Сделка: #{deal_id}\n"
             f"Сумма: {money(amount)} ₽\n"
-            f"Комментарий: {comment or '-'}"
+            f"Комментарий: {comment or '-'}",
+            delay=SHORT_DELETE_DELAY
         )
 
     except ValueError as error:
-        await message.answer(f"⚠️ {error}")
+        await send_temp_message(message, f"⚠️ {error}")
 
 
 @dp.message(Command("bb_expense"))
@@ -493,13 +571,13 @@ async def close_deal_handler(message: Message):
     parts = message.text.split(maxsplit=1)
 
     if len(parts) < 2:
-        await message.answer("Пример:\n/bb_close 1")
+        await send_temp_message(message, "Пример:\n/bb_close 1")
         return
 
     try:
         deal_id = int(parts[1])
     except ValueError:
-        await message.answer("Номер сделки должен быть числом.")
+        await send_temp_message(message, "Номер сделки должен быть числом.")
         return
 
     try:
@@ -523,10 +601,10 @@ async def close_deal_handler(message: Message):
 
         text += "\nПосмотреть все долги: /bb_debts"
 
-        await message.answer(text)
+        await send_temp_message(message, text, delay=LONG_DELETE_DELAY)
 
     except ValueError as error:
-        await message.answer(f"⚠️ {error}")
+        await send_temp_message(message, f"⚠️ {error}")
 
 
 @dp.message(Command("bb_debts"))
@@ -534,7 +612,7 @@ async def debts_handler(message: Message):
     payments = get_unpaid_payments()
 
     if not payments:
-        await message.answer("✅ Активных долгов нет.")
+        await send_temp_message(message, "✅ Активных долгов нет.")
         return
 
     text = "💳 Активные долги\n\n"
@@ -547,7 +625,7 @@ async def debts_handler(message: Message):
             f"Отметить оплату: /bb_pay {payment_id}\n\n"
         )
 
-    await message.answer(text)
+    await send_temp_message(message, text, delay=LONG_DELETE_DELAY)
 
 
 @dp.message(Command("bb_pay"))
@@ -555,20 +633,20 @@ async def pay_handler(message: Message):
     parts = message.text.split(maxsplit=1)
 
     if len(parts) < 2:
-        await message.answer("Пример:\n/bb_pay 1")
+        await send_temp_message(message, "Пример:\n/bb_pay 1")
         return
 
     try:
         payment_id = int(parts[1])
     except ValueError:
-        await message.answer("Номер долга должен быть числом.")
+        await send_temp_message(message, "Номер долга должен быть числом.")
         return
 
     try:
         mark_payment_paid(payment_id)
-        await message.answer(f"✅ Долг #{payment_id} отмечен как оплаченный.")
+        await send_temp_message(message, f"✅ Долг #{payment_id} отмечен как оплаченный.", delay=SHORT_DELETE_DELAY)
     except ValueError as error:
-        await message.answer(f"⚠️ {error}")
+        await send_temp_message(message, f"⚠️ {error}")
 
 
 @dp.message(Command("bb_stock"))
@@ -576,7 +654,7 @@ async def stock_handler(message: Message):
     deals = get_deals(only_open=True)
 
     if not deals:
-        await message.answer("📦 Открытых сделок нет.")
+        await send_temp_message(message, "📦 Открытых сделок нет.")
         return
 
     text = "📦 Техника в работе\n\n"
@@ -591,14 +669,15 @@ async def stock_handler(message: Message):
             f"Получено: {money(totals['income'])} ₽\n\n"
         )
 
-    await message.answer(text)
+    await send_temp_message(message, text, delay=LONG_DELETE_DELAY)
 
 
 @dp.message(Command("bb_capital"))
 async def capital_handler(message: Message):
     data = get_global_capital()
 
-    await message.answer(
+    await send_temp_message(
+        message,
         "📊 Капитал\n\n"
         "Открытые сделки:\n"
         f"Деньги в товаре: {money(data['open_frozen'])} ₽\n"
@@ -607,14 +686,16 @@ async def capital_handler(message: Message):
         "За всё время:\n"
         f"Всего расходов: {money(data['total_expense'])} ₽\n"
         f"Всего доходов: {money(data['total_income'])} ₽\n"
-        f"Общая прибыль: {money(data['total_profit'])} ₽"
+        f"Общая прибыль: {money(data['total_profit'])} ₽",
+        delay=LONG_DELETE_DELAY
     )
 
 
 async def report_handler(message: Message, days: int, title: str):
     data = get_report(days)
 
-    await message.answer(
+    await send_temp_message(
+        message,
         f"📈 {title}\n\n"
         f"Создано сделок: {data['deals_created']}\n"
         f"Закрыто сделок: {data['deals_closed']}\n\n"
@@ -622,7 +703,8 @@ async def report_handler(message: Message, days: int, title: str):
         f"Доходы: {money(data['income'])} ₽\n"
         f"Прибыль периода: {money(data['profit'])} ₽\n\n"
         f"Кол-во расходов: {data['expense_count']}\n"
-        f"Кол-во доходов: {data['income_count']}"
+        f"Кол-во доходов: {data['income_count']}",
+        delay=LONG_DELETE_DELAY
     )
 
 
@@ -646,7 +728,7 @@ async def history_handler(message: Message):
     rows = get_history()
 
     if not rows:
-        await message.answer("🧾 История пока пустая.")
+        await send_temp_message(message, "🧾 История пока пустая.")
         return
 
     text = "🧾 Последние операции\n\n"
@@ -659,7 +741,7 @@ async def history_handler(message: Message):
             f"Комментарий: {comment or '-'}\n\n"
         )
 
-    await message.answer(text)
+    await send_temp_message(message, text, delay=LONG_DELETE_DELAY)
 
 
 @dp.message(Command("bb_clear"))
@@ -667,7 +749,8 @@ async def clear_test_data_handler(message: Message):
     admin = require_admin(message)
 
     if admin is None:
-        await message.answer(
+        await send_temp_message(
+            message,
             "⛔ У тебя нет прав на очистку данных.\n\n"
             "Эта команда доступна только админу."
         )
@@ -675,13 +758,15 @@ async def clear_test_data_handler(message: Message):
 
     clear_test_data()
 
-    await message.answer(
+    await send_temp_message(
+        message,
         "🧹 Тестовые данные очищены\n\n"
         "Удалено:\n"
         "• все сделки;\n"
         "• все расходы и доходы;\n"
         "• все долги.\n\n"
-        "Партнёры сохранены."
+        "Партнёры сохранены.",
+        delay=SHORT_DELETE_DELAY
     )
 
 
@@ -690,7 +775,8 @@ async def reset_all_data_handler(message: Message):
     admin = require_admin(message)
 
     if admin is None:
-        await message.answer(
+        await send_temp_message(
+            message,
             "⛔ У тебя нет прав на полный сброс.\n\n"
             "Эта команда доступна только админу."
         )
@@ -698,7 +784,8 @@ async def reset_all_data_handler(message: Message):
 
     reset_all_data()
 
-    await message.answer(
+    await send_temp_message(
+        message,
         "⚠️ Полный сброс выполнен\n\n"
         "Удалено всё:\n"
         "• партнёры;\n"
@@ -706,7 +793,8 @@ async def reset_all_data_handler(message: Message):
         "• расходы;\n"
         "• доходы;\n"
         "• долги.\n\n"
-        "Теперь каждому партнёру нужно снова написать /bb_join."
+        "Теперь каждому партнёру нужно снова написать /bb_join.",
+        delay=SHORT_DELETE_DELAY
     )
 
 
@@ -715,7 +803,8 @@ async def delete_deal_handler(message: Message):
     admin = require_admin(message)
 
     if admin is None:
-        await message.answer(
+        await send_temp_message(
+            message,
             "⛔ У тебя нет прав на удаление сделок.\n\n"
             "Эта команда доступна только админу."
         )
@@ -724,25 +813,27 @@ async def delete_deal_handler(message: Message):
     parts = message.text.split(maxsplit=1)
 
     if len(parts) < 2:
-        await message.answer("Формат команды:\n/bb_delete_deal 1")
+        await send_temp_message(message, "Формат команды:\n/bb_delete_deal 1")
         return
 
     try:
         deal_id = int(parts[1])
     except ValueError:
-        await message.answer("Номер сделки должен быть числом.")
+        await send_temp_message(message, "Номер сделки должен быть числом.")
         return
 
     try:
         delete_deal_by_id(deal_id)
 
-        await message.answer(
+        await send_temp_message(
+            message,
             f"🗑 Сделка #{deal_id} удалена\n\n"
-            "Также удалены все расходы, доходы и долги по этой сделке."
+            "Также удалены все расходы, доходы и долги по этой сделке.",
+            delay=SHORT_DELETE_DELAY
         )
 
     except ValueError as error:
-        await message.answer(f"⚠️ {error}")
+        await send_temp_message(message, f"⚠️ {error}")
 
 
 @dp.message(Command("bb_export"))
@@ -779,9 +870,11 @@ async def export_handler(message: Message):
     filename = f"resale_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
     wb.save(filename)
 
-    await message.answer_document(
-        FSInputFile(filename),
-        caption="📊 Excel-отчёт готов"
+    await send_temp_document(
+        message,
+        filename,
+        caption="📊 Excel-отчёт готов",
+        delay=LONG_DELETE_DELAY
     )
 
     try:
