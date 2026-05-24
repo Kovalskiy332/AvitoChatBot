@@ -124,20 +124,6 @@ def get_partner_by_telegram_id(telegram_id: int):
         return cursor.fetchone()
 
 
-def get_partner_by_id(partner_id: int):
-    # Ищем партнёра по внутреннему ID
-    with get_connection() as conn:
-        cursor = conn.cursor()
-
-        cursor.execute("""
-        SELECT id, telegram_id, username, first_name, last_name, display_name, is_admin
-        FROM partners
-        WHERE id = ?;
-        """, (partner_id,))
-
-        return cursor.fetchone()
-
-
 def get_partners():
     # Получаем всех партнёров
     with get_connection() as conn:
@@ -362,8 +348,8 @@ def close_deal_and_calculate_payments(deal_id: int):
             expenses_paid = Decimal(str(expenses_paid))
             income_received = Decimal(str(income_received))
 
-            # Должен получить: свои расходы назад + долю прибыли - то, что уже получил доходами
             net = expenses_paid + share - income_received
+
             balances.append({
                 "partner_id": partner_id,
                 "display_name": display_name,
@@ -371,12 +357,20 @@ def close_deal_and_calculate_payments(deal_id: int):
             })
 
         receivers = [
-            {"partner_id": item["partner_id"], "display_name": item["display_name"], "amount": item["net"]}
+            {
+                "partner_id": item["partner_id"],
+                "display_name": item["display_name"],
+                "amount": item["net"]
+            }
             for item in balances if item["net"] > 0
         ]
 
         payers = [
-            {"partner_id": item["partner_id"], "display_name": item["display_name"], "amount": -item["net"]}
+            {
+                "partner_id": item["partner_id"],
+                "display_name": item["display_name"],
+                "amount": -item["net"]
+            }
             for item in balances if item["net"] < 0
         ]
 
@@ -489,8 +483,8 @@ def get_global_capital():
 
         cursor.execute("""
         SELECT
-            COALESCE(SUM(CASE WHEN dt.type = 'expense' THEN dt.amount ELSE 0 END), 0),
-            COALESCE(SUM(CASE WHEN dt.type = 'income' THEN dt.amount ELSE 0 END), 0)
+            COALESCE(SUM(CASE WHEN dt.type = 'expense' THEN amount ELSE 0 END), 0),
+            COALESCE(SUM(CASE WHEN dt.type = 'income' THEN amount ELSE 0 END), 0)
         FROM deal_transactions dt
         JOIN deals d ON d.id = dt.deal_id
         WHERE d.is_closed = 0;
@@ -500,8 +494,8 @@ def get_global_capital():
 
         cursor.execute("""
         SELECT
-            COALESCE(SUM(CASE WHEN dt.type = 'expense' THEN dt.amount ELSE 0 END), 0),
-            COALESCE(SUM(CASE WHEN dt.type = 'income' THEN dt.amount ELSE 0 END), 0)
+            COALESCE(SUM(CASE WHEN dt.type = 'expense' THEN amount ELSE 0 END), 0),
+            COALESCE(SUM(CASE WHEN dt.type = 'income' THEN amount ELSE 0 END), 0)
         FROM deal_transactions dt;
         """)
 
@@ -647,3 +641,55 @@ def get_export_data():
             "payments": payments,
             "partners": partners
         }
+
+
+def clear_test_data():
+    # Удаляем сделки, операции и долги, но оставляем партнёров
+    with get_connection() as conn:
+        cursor = conn.cursor()
+
+        cursor.execute("DELETE FROM payments;")
+        cursor.execute("DELETE FROM deal_transactions;")
+        cursor.execute("DELETE FROM deals;")
+
+        cursor.execute("""
+        DELETE FROM sqlite_sequence
+        WHERE name IN ('payments', 'deal_transactions', 'deals');
+        """)
+
+        conn.commit()
+
+
+def reset_all_data():
+    # Полностью очищаем всю базу
+    with get_connection() as conn:
+        cursor = conn.cursor()
+
+        cursor.execute("DELETE FROM payments;")
+        cursor.execute("DELETE FROM deal_transactions;")
+        cursor.execute("DELETE FROM deals;")
+        cursor.execute("DELETE FROM partners;")
+
+        cursor.execute("""
+        DELETE FROM sqlite_sequence
+        WHERE name IN ('payments', 'deal_transactions', 'deals', 'partners');
+        """)
+
+        conn.commit()
+
+
+def delete_deal_by_id(deal_id: int):
+    # Удаляем конкретную сделку вместе с операциями и долгами
+    deal = get_deal(deal_id)
+
+    if deal is None:
+        raise ValueError("Сделка не найдена")
+
+    with get_connection() as conn:
+        cursor = conn.cursor()
+
+        cursor.execute("DELETE FROM payments WHERE deal_id = ?;", (deal_id,))
+        cursor.execute("DELETE FROM deal_transactions WHERE deal_id = ?;", (deal_id,))
+        cursor.execute("DELETE FROM deals WHERE id = ?;", (deal_id,))
+
+        conn.commit()
