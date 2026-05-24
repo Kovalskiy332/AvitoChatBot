@@ -70,6 +70,48 @@ def init_db():
         );
         """)
 
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS profit_shares (
+            partner_id INTEGER PRIMARY KEY,
+            percent REAL NOT NULL,
+            FOREIGN KEY (partner_id) REFERENCES partners(id)
+        );
+        """)
+
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS profit_settings (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            common_percent REAL NOT NULL DEFAULT 0
+        );
+        """)
+
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS common_fund (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            deal_id INTEGER NOT NULL,
+            amount REAL NOT NULL,
+            comment TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (deal_id) REFERENCES deals(id)
+        );
+        """)
+
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS common_contributions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            partner_id INTEGER NOT NULL,
+            amount REAL NOT NULL,
+            comment TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (partner_id) REFERENCES partners(id)
+        );
+        """)
+
+        cursor.execute("""
+        INSERT OR IGNORE INTO profit_settings (id, common_percent)
+        VALUES (1, 0);
+        """)
+
         conn.commit()
 
 
@@ -143,7 +185,7 @@ def create_deal(title: str, telegram_id: int):
     partner = get_partner_by_telegram_id(telegram_id)
 
     if partner is None:
-        raise ValueError("Сначала зарегистрируйся через /join")
+        raise ValueError("Сначала зарегистрируйся через /bb_join")
 
     partner_id = partner[0]
 
@@ -240,7 +282,7 @@ def add_deal_transaction(deal_id: int, telegram_id: int, transaction_type: str, 
     partner = get_partner_by_telegram_id(telegram_id)
 
     if partner is None:
-        raise ValueError("Сначала зарегистрируйся через /join")
+        raise ValueError("Сначала зарегистрируйся через /bb_join")
 
     partner_id = partner[0]
 
@@ -301,8 +343,88 @@ def get_deal_totals(deal_id: int):
         }
 
 
+def get_profit_shares():
+    # Получаем настройки распределения прибыли
+    partners = get_partners()
+
+    with get_connection() as conn:
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT common_percent FROM profit_settings WHERE id = 1;")
+        row = cursor.fetchone()
+        common_percent = row[0] if row else 0
+
+        cursor.execute("""
+        SELECT
+            p.id,
+            p.display_name,
+            p.username,
+            COALESCE(ps.percent, 0)
+        FROM partners p
+        LEFT JOIN profit_shares ps ON ps.partner_id = p.id
+        ORDER BY p.id;
+        """)
+
+        rows = cursor.fetchall()
+
+    total_partner_percent = sum(row[3] for row in rows)
+
+    # Если доли ещё не настроены, делим 100% между партнёрами поровну
+    if partners and total_partner_percent == 0 and common_percent == 0:
+        equal_percent = round(100 / len(partners), 2)
+
+        rows = [
+            (partner_id, display_name, username, equal_percent)
+            for partner_id, telegram_id, username, display_name, is_admin in partners
+        ]
+
+    return {
+        "common_percent": common_percent,
+        "partners": rows
+    }
+
+
+def set_profit_shares(shares: dict[int, float], common_percent: float):
+    # Настраиваем проценты выплат партнёрам и процент в общий счёт
+    if common_percent < 0:
+        raise ValueError("Процент общего счёта не может быть меньше 0")
+
+    partners = get_partners()
+    partner_ids = [partner[0] for partner in partners]
+
+    for partner_id in shares:
+        if partner_id not in partner_ids:
+            raise ValueError(f"Партнёр с ID {partner_id} не найден")
+
+        if shares[partner_id] < 0:
+            raise ValueError("Процент партнёра не может быть меньше 0")
+
+    total_percent = common_percent + sum(shares.values())
+
+    if round(total_percent, 2) != 100:
+        raise ValueError(f"Сумма процентов должна быть 100%. Сейчас: {total_percent}%")
+
+    with get_connection() as conn:
+        cursor = conn.cursor()
+
+        cursor.execute("""
+        INSERT OR REPLACE INTO profit_settings (id, common_percent)
+        VALUES (1, ?);
+        """, (common_percent,))
+
+        cursor.execute("DELETE FROM profit_shares;")
+
+        for partner_id, percent in shares.items():
+            cursor.execute("""
+            INSERT INTO profit_shares (partner_id, percent)
+            VALUES (?, ?);
+            """, (partner_id, percent))
+
+        conn.commit()
+
+
 def close_deal_and_calculate_payments(deal_id: int):
-    # Закрываем сделку и считаем, кто кому должен
+    # Закрываем сделку и считаем, кто кому должен, с учётом долей и общего счёта
     deal = get_deal(deal_id)
 
     if deal is None:
@@ -333,14 +455,33 @@ def close_deal_and_calculate_payments(deal_id: int):
         """, (deal_id,))
 
         rows = cursor.fetchall()
-
         totals = get_deal_totals(deal_id)
 
         total_income = Decimal(str(totals["income"]))
         total_expense = Decimal(str(totals["expense"]))
         profit = total_income - total_expense
 
-        share = (profit / Decimal(len(partners))).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        shares_data = get_profit_shares()
+        common_percent = Decimal(str(shares_data["common_percent"]))
+
+        partner_percent_map = {
+            partner_id: Decimal(str(percent))
+            for partner_id, display_name, username, percent in shares_data["partners"]
+        }
+
+        common_amount = Decimal("0")
+
+        # Общий счёт пополняется только при положительной прибыли
+        if profit > 0 and common_percent > 0:
+            common_amount = (profit * common_percent / Decimal("100")).quantize(
+                Decimal("0.01"),
+                rounding=ROUND_HALF_UP
+            )
+
+        partner_total_percent = sum(partner_percent_map.values())
+
+        if partner_total_percent <= 0:
+            raise ValueError("Не настроены проценты партнёров")
 
         balances = []
 
@@ -348,12 +489,29 @@ def close_deal_and_calculate_payments(deal_id: int):
             expenses_paid = Decimal(str(expenses_paid))
             income_received = Decimal(str(income_received))
 
-            net = expenses_paid + share - income_received
+            partner_percent = partner_percent_map.get(partner_id, Decimal("0"))
+
+            if profit >= 0:
+                partner_profit = (profit * partner_percent / Decimal("100")).quantize(
+                    Decimal("0.01"),
+                    rounding=ROUND_HALF_UP
+                )
+            else:
+                # Убыток делим между партнёрами по их долям, общий счёт не трогаем
+                partner_profit = (profit * partner_percent / partner_total_percent).quantize(
+                    Decimal("0.01"),
+                    rounding=ROUND_HALF_UP
+                )
+
+            # Должен получить: свои расходы назад + доля прибыли - то, что уже получил доходом
+            net = expenses_paid + partner_profit - income_received
 
             balances.append({
                 "partner_id": partner_id,
                 "display_name": display_name,
-                "net": net
+                "net": net,
+                "partner_profit": partner_profit,
+                "percent": partner_percent
             })
 
         receivers = [
@@ -412,6 +570,16 @@ def close_deal_and_calculate_payments(deal_id: int):
             if payer["amount"] <= Decimal("0.01"):
                 payer_index += 1
 
+        if common_amount > 0:
+            cursor.execute("""
+            INSERT INTO common_fund (deal_id, amount, comment)
+            VALUES (?, ?, ?);
+            """, (
+                deal_id,
+                float(common_amount),
+                "Доля прибыли в общий счёт"
+            ))
+
         cursor.execute("""
         UPDATE deals
         SET is_closed = 1,
@@ -426,7 +594,9 @@ def close_deal_and_calculate_payments(deal_id: int):
             "expense": total_expense,
             "income": total_income,
             "profit": profit,
-            "share": share,
+            "common_percent": common_percent,
+            "common_amount": common_amount,
+            "partner_profits": balances,
             "payments": created_payments
         }
 
@@ -476,6 +646,75 @@ def mark_payment_paid(payment_id: int):
             raise ValueError("Долг не найден или уже оплачен")
 
 
+def get_common_fund_total():
+    # Считаем общий бюджет: проценты со сделок + ручные пополнения
+    with get_connection() as conn:
+        cursor = conn.cursor()
+
+        cursor.execute("""
+        SELECT COALESCE(SUM(amount), 0)
+        FROM common_fund;
+        """)
+        deal_common_total = cursor.fetchone()[0]
+
+        cursor.execute("""
+        SELECT COALESCE(SUM(amount), 0)
+        FROM common_contributions;
+        """)
+        manual_total = cursor.fetchone()[0]
+
+        return {
+            "deal_common_total": deal_common_total,
+            "manual_total": manual_total,
+            "total": deal_common_total + manual_total
+        }
+
+
+def add_common_contribution(telegram_id: int, amount: float, comment: str):
+    # Партнёр вручную вносит деньги в общий бюджет
+    partner = get_partner_by_telegram_id(telegram_id)
+
+    if partner is None:
+        raise ValueError("Сначала зарегистрируйся через /bb_join")
+
+    if amount <= 0:
+        raise ValueError("Сумма должна быть больше нуля")
+
+    partner_id = partner[0]
+
+    with get_connection() as conn:
+        cursor = conn.cursor()
+
+        cursor.execute("""
+        INSERT INTO common_contributions (partner_id, amount, comment)
+        VALUES (?, ?, ?);
+        """, (partner_id, amount, comment))
+
+        conn.commit()
+
+
+def get_common_contributions(limit: int = 15):
+    # История ручных пополнений общего бюджета
+    with get_connection() as conn:
+        cursor = conn.cursor()
+
+        cursor.execute("""
+        SELECT
+            cc.id,
+            p.display_name,
+            p.username,
+            cc.amount,
+            cc.comment,
+            cc.created_at
+        FROM common_contributions cc
+        JOIN partners p ON p.id = cc.partner_id
+        ORDER BY cc.id DESC
+        LIMIT ?;
+        """, (limit,))
+
+        return cursor.fetchall()
+
+
 def get_global_capital():
     # Считаем общий капитал по открытым сделкам
     with get_connection() as conn:
@@ -501,13 +740,16 @@ def get_global_capital():
 
         total_expense, total_income = cursor.fetchone()
 
+        common_data = get_common_fund_total()
+
         return {
             "open_expense": open_expense,
             "open_income": open_income,
             "open_frozen": open_expense - open_income,
             "total_expense": total_expense,
             "total_income": total_income,
-            "total_profit": total_income - total_expense
+            "total_profit": total_income - total_expense,
+            "common_total": common_data["total"]
         }
 
 
@@ -635,26 +877,50 @@ def get_export_data():
         """)
         partners = cursor.fetchall()
 
+        cursor.execute("""
+        SELECT id, deal_id, amount, comment, created_at
+        FROM common_fund
+        ORDER BY id;
+        """)
+        common_fund = cursor.fetchall()
+
+        cursor.execute("""
+        SELECT
+            cc.id,
+            p.display_name,
+            cc.amount,
+            cc.comment,
+            cc.created_at
+        FROM common_contributions cc
+        JOIN partners p ON p.id = cc.partner_id
+        ORDER BY cc.id;
+        """)
+        common_contributions = cursor.fetchall()
+
         return {
             "deals": deals,
             "transactions": transactions,
             "payments": payments,
-            "partners": partners
+            "partners": partners,
+            "common_fund": common_fund,
+            "common_contributions": common_contributions
         }
 
 
 def clear_test_data():
-    # Удаляем сделки, операции и долги, но оставляем партнёров
+    # Удаляем сделки, операции и долги, но оставляем партнёров и настройки долей
     with get_connection() as conn:
         cursor = conn.cursor()
 
         cursor.execute("DELETE FROM payments;")
         cursor.execute("DELETE FROM deal_transactions;")
         cursor.execute("DELETE FROM deals;")
+        cursor.execute("DELETE FROM common_fund;")
+        cursor.execute("DELETE FROM common_contributions;")
 
         cursor.execute("""
         DELETE FROM sqlite_sequence
-        WHERE name IN ('payments', 'deal_transactions', 'deals');
+        WHERE name IN ('payments', 'deal_transactions', 'deals', 'common_fund', 'common_contributions');
         """)
 
         conn.commit()
@@ -668,11 +934,27 @@ def reset_all_data():
         cursor.execute("DELETE FROM payments;")
         cursor.execute("DELETE FROM deal_transactions;")
         cursor.execute("DELETE FROM deals;")
+        cursor.execute("DELETE FROM common_fund;")
+        cursor.execute("DELETE FROM common_contributions;")
+        cursor.execute("DELETE FROM profit_shares;")
+        cursor.execute("DELETE FROM profit_settings;")
         cursor.execute("DELETE FROM partners;")
 
         cursor.execute("""
         DELETE FROM sqlite_sequence
-        WHERE name IN ('payments', 'deal_transactions', 'deals', 'partners');
+        WHERE name IN (
+            'payments',
+            'deal_transactions',
+            'deals',
+            'partners',
+            'common_fund',
+            'common_contributions'
+        );
+        """)
+
+        cursor.execute("""
+        INSERT OR IGNORE INTO profit_settings (id, common_percent)
+        VALUES (1, 0);
         """)
 
         conn.commit()
@@ -690,6 +972,7 @@ def delete_deal_by_id(deal_id: int):
 
         cursor.execute("DELETE FROM payments WHERE deal_id = ?;", (deal_id,))
         cursor.execute("DELETE FROM deal_transactions WHERE deal_id = ?;", (deal_id,))
+        cursor.execute("DELETE FROM common_fund WHERE deal_id = ?;", (deal_id,))
         cursor.execute("DELETE FROM deals WHERE id = ?;", (deal_id,))
 
         conn.commit()
